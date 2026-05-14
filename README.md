@@ -1,64 +1,88 @@
-# Better ComfyUI Slim
+# Better ComfyUI
 
-A compact and optimized Docker container designed as an easy-to-use RunPod template for ComfyUI. Images are highly optimized for size, only ~650MB while including all features!
+Pre-baked Docker image for running ComfyUI on RunPod. Zero install wait — ComfyUI, PyTorch, and all dependencies are baked into the image so your pod is ready in seconds.
 
-## Quick Deploy on RunPod
+## Deploy on RunPod
 
-[![Deploy Regular on RunPod](https://img.shields.io/badge/Deploy%20on%20RunPod-Regular%20(CUDA%2012.4)-4B6BDC?style=for-the-badge&logo=docker)](https://runpod.io/console/deploy?template=cndsag8ob0&ref=vfker49t)
+[![Regular (CUDA 12.4)](https://img.shields.io/badge/RunPod-Regular%20(CUDA%2012.4)-4B6BDC?style=for-the-badge&logo=docker)](https://runpod.io/console/deploy?template=cndsag8ob0&ref=vfker49t)
+[![RTX 5090 (CUDA 12.8)](https://img.shields.io/badge/RunPod-RTX%205090%20(CUDA%2012.8)-1BB91F?style=for-the-badge&logo=docker)](https://runpod.io/console/deploy?template=tm7neqjjww&ref=vfker49t)
 
-[![Deploy 5090 on RunPod](https://img.shields.io/badge/Deploy%20on%20RunPod-RTX%205090%20(CUDA%2012.8)-1BB91F?style=for-the-badge&logo=docker)](https://runpod.io/console/deploy?template=tm7neqjjww&ref=vfker49t)
+| Image | CUDA | PyTorch | For |
+|-------|------|---------|-----|
+| `madiator2011/better-comfyui:latest` | 12.4 | 2.7.0 | A100, 4090, 3090, etc. |
+| `madiator2011/better-comfyui:latest-5090` | 12.8 | 2.7.0 | RTX 5090, 5080, 5070 (Blackwell) |
 
+## What's Included
 
-Choose your template:
-- 🖥️ [Regular Template](https://runpod.io/console/deploy?template=cndsag8ob0&ref=vfker49t) - For most GPUs (CUDA 12.4)
-- 🎮 [RTX 5090 Template](https://runpod.io/console/deploy?template=tm7neqjjww&ref=vfker49t) - Optimized for RTX 5090 (CUDA 12.8)
+Pre-installed in the image:
+- ComfyUI + Python 3.12 venv
+- PyTorch 2.7.0 (stable, pinned)
+- ComfyUI-Manager
+- ComfyUI-Crystools
+- ComfyUI-KJNodes
+- FileBrowser, Zasper, SSH
 
-## Why Better ComfyUI Slim?
+## How It Works
 
-- 🎯 Purpose-built for RunPod deployments
-- 📦 Ultra-compact: Only ~650MB image size (compared to multi-GB alternatives)
-- 🚀 Zero configuration needed: Works out of the box
-- 🛠️ Includes all essential tools for remote work
+ComfyUI is installed at `/app/ComfyUI` inside the image. Your persistent RunPod volume at `/workspace` holds all your user data:
 
-## Features
+```
+/workspace/
+├── models/          → symlinked into ComfyUI/models
+├── output/          → symlinked into ComfyUI/output
+├── input/           → symlinked into ComfyUI/input
+├── custom_nodes/    → symlinked into ComfyUI/custom_nodes
+└── comfyui_args.txt → custom launch arguments
+```
 
-- 🚀 Two optimized variants:
-  - Regular: CUDA 12.4 with stable PyTorch
-  - RTX 5090: CUDA 12.8 with PyTorch Nightly (optimized for latest NVIDIA GPUs)
-- 🔧 Built-in tools:
-  - FileBrowser for easy file management (port 8080)
-  - Zasper (Jupiter Replacement) (port 8048)
-  - SSH access
-- 🎨 Pre-installed custom nodes:
-  - ComfyUI-Manager
-  - ComfyUI-Crystools
-  - ComfyUI-KJNodes
-- ⚡ Performance optimizations:
-  - UV package installer for faster dependency installation
-  - NVENC support in FFmpeg
-  - Optimized CUDA configurations
+On startup, symlinks connect your workspace into the pre-baked install. Models, outputs, and custom nodes persist across pod restarts.
 
 ## Ports
 
-- `8188`: ComfyUI web interface
-- `8080`: FileBrowser interface
-- `8048`: Zasper file access
-- `22`: SSH access
+| Port | Service |
+|------|---------|
+| 8188 | ComfyUI |
+| 8080 | FileBrowser |
+| 8048 | Zasper |
+| 22   | SSH |
 
-## Custom Arguments
+## Custom Launch Arguments
 
-You can customize ComfyUI startup arguments by editing `/workspace/madapps/comfyui_args.txt`. Add one argument per line:
+Edit `/workspace/comfyui_args.txt`, one per line:
+
 ```
---max-batch-size 8
+--highvram
 --preview-method auto
 ```
 
-## Directory Structure
+## Adding Custom Nodes
 
-- `/workspace/madapps/ComfyUI`: Main ComfyUI installation
-- `/workspace/madapps/comfyui_args.txt`: Custom arguments file
-- `/workspace/madapps/filebrowser.db`: FileBrowser database
+Drop repos into `/workspace/custom_nodes/`:
+
+```bash
+cd /workspace/custom_nodes
+git clone https://github.com/author/SomeNode.git
+```
+
+They'll be symlinked in and their dependencies installed on next startup.
+
+## Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PUBLIC_KEY` | — | SSH public key (skips password auth) |
+| `UPDATE_COMFYUI` | `false` | Pull latest ComfyUI + nodes on startup |
+
+## Building
+
+```bash
+docker buildx bake              # both variants
+docker buildx bake regular      # CUDA 12.4
+docker buildx bake rtx5090      # CUDA 12.8
+
+TAG=v2.0 docker buildx bake    # custom tag
+```
 
 ## License
 
-This project is licensed under the GPLv3 License.
+GPLv3

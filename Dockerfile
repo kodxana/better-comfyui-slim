@@ -3,9 +3,10 @@ FROM ubuntu:22.04
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 ENV IMAGEIO_FFMPEG_EXE=/usr/bin/ffmpeg
-ENV FILEBROWSER_CONFIG=/workspace/madapps/.filebrowser.json
 
-# Update and install minimal dependencies, CUDA, and common tools
+# ---------------------------------------------------------------------------- #
+#                          System Dependencies                                   #
+# ---------------------------------------------------------------------------- #
 RUN apt-get update && \
     apt-get upgrade -y && \
     apt-get install -y --no-install-recommends \
@@ -26,7 +27,6 @@ RUN apt-get update && \
     openssh-client \
     openssh-server \
     nano \
-    wget \
     curl \
     htop \
     tmux \
@@ -35,8 +35,6 @@ RUN apt-get update && \
     net-tools \
     iputils-ping \
     procps \
-    golang \
-    make \
     && wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb \
     && dpkg -i cuda-keyring_1.1-1_all.deb \
     && apt-get update \
@@ -47,39 +45,93 @@ RUN apt-get update && \
     && rm cuda-keyring_1.1-1_all.deb \
     && curl -sS https://bootstrap.pypa.io/get-pip.py | python3.12
 
-# Install FileBrowser
-RUN curl -fsSL https://raw.githubusercontent.com/filebrowser/get/master/get.sh | bash
+# Set Python 3.12 as default
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1 && \
+    update-alternatives --set python3 /usr/bin/python3.12
 
 # Set CUDA environment variables
 ENV PATH=/usr/local/cuda/bin:${PATH}
 ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64:${LD_LIBRARY_PATH:-}
 
-# Install Zasper webapp
+# ---------------------------------------------------------------------------- #
+#                          Tools: FileBrowser + Zasper                            #
+# ---------------------------------------------------------------------------- #
+RUN curl -fsSL https://raw.githubusercontent.com/filebrowser/get/master/get.sh | bash
+
 RUN wget https://github.com/zasper-io/zasper/releases/download/v0.1.0-alpha/zasper-webapp-linux-amd64.tar.gz \
     && tar xf zasper-webapp-linux-amd64.tar.gz -C /usr/local/bin \
     && rm zasper-webapp-linux-amd64.tar.gz
 
-# Install Jupyter with Python kernel
-RUN pip install jupyter
+# ---------------------------------------------------------------------------- #
+#                          ComfyUI Installation                                  #
+# ---------------------------------------------------------------------------- #
+ENV COMFYUI_DIR=/app/ComfyUI
+ENV VENV_DIR=/app/ComfyUI/.venv
 
-# Configure SSH for root login
+# Clone ComfyUI
+RUN git clone https://github.com/comfyanonymous/ComfyUI.git ${COMFYUI_DIR}
+
+# Create venv and install dependencies
+RUN python3.12 -m venv ${VENV_DIR} && \
+    . ${VENV_DIR}/bin/activate && \
+    pip install -U pip && \
+    pip install uv
+
+# Install PyTorch (pinned stable with CUDA 12.4)
+RUN . ${VENV_DIR}/bin/activate && \
+    UV_LINK_MODE=copy uv pip install --no-cache \
+    torch==2.7.0 \
+    torchvision==0.22.0 \
+    torchaudio==2.7.0 \
+    --index-url https://download.pytorch.org/whl/cu124
+
+# Install ComfyUI requirements
+RUN . ${VENV_DIR}/bin/activate && \
+    UV_LINK_MODE=copy uv pip install --no-cache -r ${COMFYUI_DIR}/requirements.txt
+
+# ---------------------------------------------------------------------------- #
+#                          Custom Nodes                                           #
+# ---------------------------------------------------------------------------- #
+WORKDIR ${COMFYUI_DIR}/custom_nodes
+
+# ComfyUI-Manager
+RUN git clone https://github.com/ltdrdata/ComfyUI-Manager.git
+
+# Additional custom nodes
+RUN git clone https://github.com/crystian/ComfyUI-Crystools && \
+    git clone https://github.com/kijai/ComfyUI-KJNodes
+
+# Install all custom node dependencies
+RUN . ${VENV_DIR}/bin/activate && \
+    UV_LINK_MODE=copy uv pip install --no-cache GitPython numpy pillow opencv-python && \
+    for node_dir in */; do \
+        if [ -f "${node_dir}requirements.txt" ]; then \
+            echo "Installing requirements for ${node_dir}" && \
+            UV_LINK_MODE=copy uv pip install --no-cache -r "${node_dir}requirements.txt" || true; \
+        fi; \
+        if [ -f "${node_dir}install.py" ]; then \
+            echo "Running install.py for ${node_dir}" && \
+            (cd "${node_dir}" && python install.py) || true; \
+        fi; \
+    done
+
+# ---------------------------------------------------------------------------- #
+#                          SSH Configuration                                      #
+# ---------------------------------------------------------------------------- #
 RUN sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config && \
     sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config && \
     mkdir -p /run/sshd
 
-# Create workspace directory
-RUN mkdir -p /workspace/madapps
-WORKDIR /workspace/madapps
+# ---------------------------------------------------------------------------- #
+#                          Workspace Setup                                        #
+# ---------------------------------------------------------------------------- #
+RUN mkdir -p /workspace
 
-# Expose ports
+WORKDIR ${COMFYUI_DIR}
+
 EXPOSE 8188 22 8048 8080
 
-# Copy and set up start script
 COPY start.sh /start.sh
 RUN chmod +x /start.sh
-
-# Set Python 3.12 as default
-RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1 && \
-    update-alternatives --set python3 /usr/bin/python3.12
 
 ENTRYPOINT ["/start.sh"]
